@@ -13,6 +13,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+import zlib
 
 USER = "Adityagarg2712"
 UPTIME_SINCE = "2005-12-27"
@@ -76,16 +77,19 @@ def stats():
             return json.load(r)
 
     def all_commits(created_year):
+        """Sum of GitHub's own per-year contribution totals -- the same figure the
+        profile graph shows, so the card always agrees with it. Private work is
+        included once the account opts into showing it."""
         years = range(created_year, dt.date.today().year + 1)
         window = " ".join(
             f'y{y}: contributionsCollection(from:"{y}-01-01T00:00:00Z",'
             f' to:"{y}-12-31T23:59:59Z")'
-            "{ totalCommitContributions restrictedContributionsCount }"
+            "{ contributionCalendar { totalContributions } }"
             for y in years)
         d = api("/graphql", {"query": f'{{ user(login:"{USER}") {{ {window} }} }}'})
         c = d["data"]["user"]
-        return sum(c[f"y{y}"]["totalCommitContributions"]
-                   + c[f"y{y}"]["restrictedContributionsCount"] for y in years)
+        return sum(c[f"y{y}"]["contributionCalendar"]["totalContributions"]
+                   for y in years)
 
     try:
         user = api(f"/users/{USER}")
@@ -103,9 +107,15 @@ def stats():
         return ["--"] * 4
 
 
+_CARD = None
+
+
 def card():
+    global _CARD
+    if _CARD:
+        return _CARD
     repos, stars, commits, followers = stats()
-    return [
+    _CARD = [
         ("head", f"{USER.lower()}@github"),
         ("gap",),
         ("kv", "OS", "Windows, macOS, Linux"),
@@ -128,6 +138,7 @@ def card():
         ("kv", "Commits", commits),
         ("kv", "Followers", followers),
     ]
+    return _CARD
 
 # ---------------------------------------------------------------- layout
 
@@ -259,6 +270,27 @@ def build():
     return "\n".join(o)
 
 
+def bump_readme(svg):
+    """Point the img at a content-derived URL and keep its alt text truthful.
+
+    GitHub's CDN caches /raw/main/profile.svg, so without a version that changes
+    with the bytes the page keeps serving a stale render. Derived from the SVG,
+    not the date, so an unchanged render produces no churn.
+    """
+    p = os.path.join(os.path.dirname(__file__), "README.md")
+    kv = {r[1]: r[2] for r in card() if r[0] == "kv"}
+    alt = (f"{USER.lower()}@github - {kv['Kernel']} at {kv['Host']}. {kv['OS']}. "
+           f"{kv['Languages.Programming']}. {kv['Email']}")
+    tag = (f'<img src="profile.svg?v={zlib.crc32(svg.encode()) & 0xffffffff:x}"'
+           f' alt="{esc(alt)}" width="100%">')
+    old = open(p).read()
+    new = re.sub(r'<img src="profile\.svg[^>]*>', tag, old)
+    if new != old:
+        with open(p, "w") as f:
+            f.write(new)
+        print(f"bumped {p}")
+
+
 if __name__ == "__main__":
     assert "Uptime" in [r[1] for r in card() if r[0] == "kv"]
     assert uptime("2024-09-23")  # date math doesn't blow up on today
@@ -267,3 +299,4 @@ if __name__ == "__main__":
     with open(OUT, "w") as f:
         f.write(svg)
     print(f"wrote {OUT} ({len(svg):,} bytes)")
+    bump_readme(svg)
