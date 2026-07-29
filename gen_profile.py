@@ -49,9 +49,14 @@ def rendered(label):
         svg = open(OUT).read()
     except FileNotFoundError:
         return None
-    m = re.search(rf">{label}:</tspan>(?:<tspan[^>]*>[^<]*</tspan>)"
-                  rf"<tspan[^>]*>([^<]*)</tspan>", svg)
-    return m.group(1) if m else None
+    m = re.search(rf">{label}:</tspan>(.*?)</text>", svg)
+    if not m:
+        return None
+    # first tspan is the dot leader; a value may be split across several
+    # (the diff colouring does exactly that), so rejoin everything after it
+    spans = re.findall(r"<tspan[^>]*>([^<]*)</tspan>", m.group(1))
+    val = "".join(spans[1:]).strip()
+    return val if val and val != "--" else None
 
 
 def stats():
@@ -98,7 +103,7 @@ def stats():
         a read:user PAT lacks -- hence the scope check before spending 20+ calls.
         """
         add = dele = 0
-        page, missed = 1, []
+        page, missed, seen = 1, [], 0
         while True:
             batch = api(f"/user/repos?per_page=100&page={page}"
                         "&affiliation=owner,collaborator,organization_member")
@@ -109,6 +114,7 @@ def stats():
                 if contrib is None:
                     missed.append(r["full_name"])
                     continue
+                seen += 1
                 for c in contrib:
                     if (c.get("author") or {}).get("login") != USER:
                         continue
@@ -120,6 +126,9 @@ def stats():
         if missed:
             print(f"line counts exclude {len(missed)} repo(s) with no stats yet: "
                   + ", ".join(missed))
+        if not seen:
+            print("no repo stats readable; keeping the previous line counts")
+            return None      # never report 0 as if it were a real total
         return f"+{add:,} / -{dele:,}"
 
     def all_commits(created_year):
@@ -146,7 +155,8 @@ def stats():
         commits = n if os.environ.get("PROFILE_TOKEN") else (rendered("Commits") or n)
         # ponytail: private line counts need `repo` scope. Without it, keep the last
         # good figure rather than silently reporting public-only totals.
-        loc = lines() if "repo" in scopes else (rendered("Lines of Code") or lines())
+        loc = (lines() if "repo" in scopes else None) \
+            or rendered("Lines of Code") or "--"
         return [f"{user['public_repos']:,} public",
                 f"{sum(r['stargazers_count'] for r in repos):,}",
                 commits,
