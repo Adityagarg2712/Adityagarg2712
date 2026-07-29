@@ -1,25 +1,13 @@
-<h1 align="center">Aditya Garg</h1>
+<p align="center">
+  <img src="profile.svg" alt="adityagarg2712@github — Physics + ML / Hardware at Stanford. macOS, Linux. Python, C++, JavaScript. aditya27@stanford.edu" width="100%">
+</p>
 
 <p align="center">
-  <a href="https://github.com/Adityagarg2712">
-    <picture>
-      <source
-        media="(prefers-color-scheme: dark)"
-        srcset="https://raw.githubusercontent.com/Adityagarg2712/Adityagarg2712/output/snake-dark.svg"
-      />
-      <source
-        media="(prefers-color-scheme: light)"
-        srcset="https://raw.githubusercontent.com/Adityagarg2712/Adityagarg2712/output/snake-light.svg"
-      />
-      <img
-        alt="A snake eating its way through my contribution graph"
-        src="https://raw.githubusercontent.com/Adityagarg2712/Adityagarg2712/output/snake-light.svg"
-      />
-    </picture>
-  </a>
+  <a href="mailto:aditya27@stanford.edu">email</a> ·
+  <a href="https://www.linkedin.com/in/Aditya27Garg">linkedin</a>
 </p>
 
 <p align="center">
   <sub>Regenerated daily by
-  <a href="./.github/workflows/snake.yml">a GitHub Action</a>.</sub>
+  <a href="./.github/workflows/profile.yml">a GitHub Action</a>.</sub>
 </p>
