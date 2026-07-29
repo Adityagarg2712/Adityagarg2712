@@ -11,6 +11,7 @@ import datetime as dt
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 import zlib
@@ -63,18 +64,63 @@ def stats():
     """
     token = os.environ.get("PROFILE_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
-        return ["--"] * 4
+        return ["--"] * 5
+    scopes = []   # filled in from X-OAuth-Scopes on the first response
 
-    def api(path, body=None):
-        req = urllib.request.Request(
-            "https://api.github.com" + path,
-            data=json.dumps(body).encode() if body else None,
-            headers={"Authorization": f"Bearer {token}",
-                     "Accept": "application/vnd.github+json",
-                     "User-Agent": USER},
-        )
-        with urllib.request.urlopen(req, timeout=20) as r:
-            return json.load(r)
+    def api(path, body=None, tries=4):
+        for _ in range(tries):
+            req = urllib.request.Request(
+                "https://api.github.com" + path,
+                data=json.dumps(body).encode() if body else None,
+                headers={"Authorization": f"Bearer {token}",
+                         "Accept": "application/vnd.github+json",
+                         "User-Agent": USER},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    raw = r.read()
+                    if r.status == 202:      # stats still being generated
+                        time.sleep(3)
+                        continue
+                    scopes[:] = [s.strip() for s
+                                 in (r.headers.get("X-OAuth-Scopes") or "").split(",")]
+                    return json.loads(raw) if raw else None
+            except urllib.error.HTTPError as e:
+                if e.code in (403, 404, 409):   # no access, or empty repo
+                    return None
+                raise
+        return None
+
+    def lines():
+        """Additions/deletions credited to USER across every repo the token sees.
+
+        Contributor stats are per-repo and private ones need `repo` scope, which
+        a read:user PAT lacks -- hence the scope check before spending 20+ calls.
+        """
+        add = dele = 0
+        page, missed = 1, []
+        while True:
+            batch = api(f"/user/repos?per_page=100&page={page}"
+                        "&affiliation=owner,collaborator,organization_member")
+            if not batch:
+                break
+            for r in batch:
+                contrib = api(f"/repos/{r['full_name']}/stats/contributors")
+                if contrib is None:
+                    missed.append(r["full_name"])
+                    continue
+                for c in contrib:
+                    if (c.get("author") or {}).get("login") != USER:
+                        continue
+                    add += sum(w["a"] for w in c["weeks"])
+                    dele += sum(w["d"] for w in c["weeks"])
+            if len(batch) < 100:
+                break
+            page += 1
+        if missed:
+            print(f"line counts exclude {len(missed)} repo(s) with no stats yet: "
+                  + ", ".join(missed))
+        return f"+{add:,} / -{dele:,}"
 
     def all_commits(created_year):
         """Sum of GitHub's own per-year contribution totals -- the same figure the
@@ -98,13 +144,17 @@ def stats():
         # ponytail: without a PAT the count silently drops to public-only, so keep
         # whatever the last good render had. Set PROFILE_TOKEN and this goes away.
         commits = n if os.environ.get("PROFILE_TOKEN") else (rendered("Commits") or n)
+        # ponytail: private line counts need `repo` scope. Without it, keep the last
+        # good figure rather than silently reporting public-only totals.
+        loc = lines() if "repo" in scopes else (rendered("Lines of Code") or lines())
         return [f"{user['public_repos']:,} public",
                 f"{sum(r['stargazers_count'] for r in repos):,}",
                 commits,
-                f"{user['followers']:,}"]
+                f"{user['followers']:,}",
+                loc]
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError, TimeoutError) as e:
         print(f"stats fetch failed ({e}); rendering dashes")
-        return ["--"] * 4
+        return ["--"] * 5
 
 
 _CARD = None
@@ -114,7 +164,7 @@ def card():
     global _CARD
     if _CARD:
         return _CARD
-    repos, stars, commits, followers = stats()
+    repos, stars, commits, followers, loc = stats()
     _CARD = [
         ("head", f"{USER.lower()}@github"),
         ("gap",),
@@ -137,6 +187,7 @@ def card():
         ("kv", "Stars", stars),
         ("kv", "Commits", commits),
         ("kv", "Followers", followers),
+        ("kv", "Lines of Code", loc),
     ]
     return _CARD
 
