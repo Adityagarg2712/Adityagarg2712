@@ -201,8 +201,9 @@ ART_LH = ART_FS * CH * 2   # terminal cell is 1:2, so line height = 2x char adva
 FS, LH = 14.0, 22.0
 PAD, GAP = 34.0, 46.0
 
-C = {"bg": "#0d1117", "edge": "#30363d", "label": "#e3a869", "val": "#c9d1d9",
-     "dot": "#3d444d", "head": "#58a6ff", "rule": "#30363d"}
+C = {"bg": "#0d1117", "edge": "#444c56", "label": "#ffa657", "val": "#f0f6fc",
+     "dot": "#6e7681", "head": "#79c0ff", "rule": "#444c56",
+     "add": "#56d364", "del": "#ff7b72"}
 
 
 def esc(s):
@@ -240,10 +241,16 @@ def row(item, x, y, w, COLS):
     label, val = esc(item[1]) + ":", esc(item[2])
     fill = max(1, COLS - len(label) - len(val) - 2)
     dots = ("".join(" ." for _ in range(fill // 2 + 1)))[:fill]
+    # diff counts read better green/red, the way a diff does
+    m = re.fullmatch(r"(\+[\d,]+)( / )(-[\d,]+)", val)
+    body = (f'<tspan fill="{C["add"]}">{m[1]}</tspan>'
+            f'<tspan fill="{C["dot"]}">{m[2]}</tspan>'
+            f'<tspan fill="{C["del"]}">{m[3]}</tspan>') if m else \
+           f'<tspan fill="{C["val"]}">{val}</tspan>'
     return (f'<text x="{x:.1f}" y="{y:.1f}" xml:space="preserve">'
             f'<tspan fill="{C["label"]}">{label}</tspan>'
             f'<tspan fill="{C["dot"]}"> {dots} </tspan>'
-            f'<tspan fill="{C["val"]}">{val}</tspan></text>')
+            f'{body}</text>')
 
 
 def build():
@@ -266,8 +273,8 @@ def build():
          f'viewBox="0 0 {w:.0f} {h:.0f}" font-family="ui-monospace,SFMono-Regular,'
          f'Menlo,DejaVu Sans Mono,Consolas,monospace">',
          '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
-         '<stop offset="0" stop-color="#7ee0d3"/><stop offset="0.55" stop-color="#6c8cff"/>'
-         '<stop offset="1" stop-color="#b78cff"/></linearGradient>',
+         '<stop offset="0" stop-color="#a5f3ea"/><stop offset="0.55" stop-color="#8ab4ff"/>'
+         '<stop offset="1" stop-color="#d2b3ff"/></linearGradient>',
          # art draws top-to-bottom
          f'<clipPath id="scan"><rect x="0" y="{art_y - ART_LH:.1f}" width="{w:.0f}" height="0">'
          f'<animate attributeName="height" from="0" to="{art_h + ART_LH:.1f}"'
