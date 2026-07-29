@@ -10,6 +10,7 @@ stdlib only. The GitHub Action re-runs this on a cron and commits the SVG.
 import datetime as dt
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 
@@ -40,15 +41,33 @@ def add_months(d, n):
     return dt.date(y, m, day)
 
 
+def rendered(label):
+    """The value this label already shows in profile.svg, if the file exists."""
+    try:
+        svg = open(OUT).read()
+    except FileNotFoundError:
+        return None
+    m = re.search(rf">{label}:</tspan>(?:<tspan[^>]*>[^<]*</tspan>)"
+                  rf"<tspan[^>]*>([^<]*)</tspan>", svg)
+    return m.group(1) if m else None
+
+
 def stats():
-    """(repos, stars, commits, followers) from the GitHub API, or dashes."""
-    token = os.environ.get("GITHUB_TOKEN")
+    """(repos, stars, commits, followers) from the GitHub API, or dashes.
+
+    Commits are all-time and include private work, which only the GraphQL
+    contributions API exposes -- and only to a token owned by USER. The
+    repo-scoped GITHUB_TOKEN sees public contributions only, so the Action
+    needs a PAT (read:user) in secrets.PROFILE_TOKEN for the full number.
+    """
+    token = os.environ.get("PROFILE_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         return ["--"] * 4
 
-    def get(path):
+    def api(path, body=None):
         req = urllib.request.Request(
             "https://api.github.com" + path,
+            data=json.dumps(body).encode() if body else None,
             headers={"Authorization": f"Bearer {token}",
                      "Accept": "application/vnd.github+json",
                      "User-Agent": USER},
@@ -56,13 +75,28 @@ def stats():
         with urllib.request.urlopen(req, timeout=20) as r:
             return json.load(r)
 
+    def all_commits(created_year):
+        years = range(created_year, dt.date.today().year + 1)
+        window = " ".join(
+            f'y{y}: contributionsCollection(from:"{y}-01-01T00:00:00Z",'
+            f' to:"{y}-12-31T23:59:59Z")'
+            "{ totalCommitContributions restrictedContributionsCount }"
+            for y in years)
+        d = api("/graphql", {"query": f'{{ user(login:"{USER}") {{ {window} }} }}'})
+        c = d["data"]["user"]
+        return sum(c[f"y{y}"]["totalCommitContributions"]
+                   + c[f"y{y}"]["restrictedContributionsCount"] for y in years)
+
     try:
-        user = get(f"/users/{USER}")
-        repos = get(f"/users/{USER}/repos?per_page=100&type=owner")
-        commits = get(f"/search/commits?q=author:{USER}&per_page=1")
-        return [f"{user['public_repos']:,}",
+        user = api(f"/users/{USER}")
+        repos = api(f"/users/{USER}/repos?per_page=100&type=owner")
+        n = f"{all_commits(int(user['created_at'][:4])):,}"
+        # ponytail: without a PAT the count silently drops to public-only, so keep
+        # whatever the last good render had. Set PROFILE_TOKEN and this goes away.
+        commits = n if os.environ.get("PROFILE_TOKEN") else (rendered("Commits") or n)
+        return [f"{user['public_repos']:,} public",
                 f"{sum(r['stargazers_count'] for r in repos):,}",
-                f"{commits['total_count']:,}",
+                commits,
                 f"{user['followers']:,}"]
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError, TimeoutError) as e:
         print(f"stats fetch failed ({e}); rendering dashes")
@@ -74,14 +108,14 @@ def card():
     return [
         ("head", f"{USER.lower()}@github"),
         ("gap",),
-        ("kv", "OS", "macOS, Linux"),
+        ("kv", "OS", "Windows, macOS, Linux"),
         ("kv", "Uptime", uptime(UPTIME_SINCE)),
         ("kv", "Host", "Stanford University"),
-        ("kv", "Kernel", "Physics + ML / Hardware"),
-        ("kv", "IDE", "Claude Code, Cursor, Jupyter"),
+        ("kv", "Kernel", "Physics + CS"),
+        ("kv", "IDE", "Claude Code, Cursor, VS Code, Jupyter"),
         ("gap",),
         ("kv", "Languages.Programming", "Python, C++, JavaScript"),
-        ("kv", "Languages.Real", "English, Hindi, French, Gujarati"),
+        ("kv", "Languages.Real", "English, Hindi, French"),
         ("kv", "Hobbies", "Sci-fi games, board games, finding loopholes"),
         ("gap",),
         ("sec", "Contact"),
@@ -99,9 +133,10 @@ def card():
 
 ART_ROWS = 57      # rows to keep; the source art's tail is dithered noise
 MIN_COLS = 54      # card width in characters; grows if a row needs it
-ART_FS, ART_LH = 6.4, 6.4
-FS, LH = 14.0, 22.0
 CH = 0.6           # monospace advance / font-size
+ART_FS = 6.4
+ART_LH = ART_FS * CH * 2   # terminal cell is 1:2, so line height = 2x char advance
+FS, LH = 14.0, 22.0
 PAD, GAP = 34.0, 46.0
 
 C = {"bg": "#0d1117", "edge": "#30363d", "label": "#e3a869", "val": "#c9d1d9",
@@ -194,10 +229,12 @@ def build():
     o.append(f'<rect x="10" y="10" width="{w - 20:.0f}" height="{h - 20:.0f}" rx="12"'
              f' fill="none" stroke="{C["edge"]}"/>')
 
-    o.append(f'<g clip-path="url(#scan)" font-size="{ART_FS}" fill="url(#g)"'
-             f' xml:space="preserve">')
+    o.append(f'<g clip-path="url(#scan)" font-size="{ART_FS}" fill="url(#g)">')
     for i, line in enumerate(art):
-        o.append(f'<text x="{art_x}" y="{art_y + i * ART_LH:.1f}">{esc(line)}</text>')
+        # xml:space must sit on the text element -- it does NOT inherit from the g,
+        # and without it every run of spaces collapses and the art shears.
+        o.append(f'<text x="{art_x}" y="{art_y + i * ART_LH:.1f}"'
+                 f' xml:space="preserve">{esc(line)}</text>')
     # scanline riding the reveal
     o.append(f'<rect x="{art_x}" y="{art_y:.1f}" width="{art_w:.1f}" height="2"'
              f' fill="#7ee0d3" opacity="0">'

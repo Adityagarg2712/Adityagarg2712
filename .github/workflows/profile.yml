@@ -18,6 +18,9 @@ jobs:
       - run: python3 gen_profile.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional PAT with read:user. Without it the commit count can only see
+          # public contributions, so the previous value is kept instead.
+          PROFILE_TOKEN: ${{ secrets.PROFILE_TOKEN }}
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
