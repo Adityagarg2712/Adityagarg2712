@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="profile.svg?v=8f1ecf26" alt="adityagarg2712@github - Physics + CS at Stanford University. Windows, macOS, Linux. Python, C++, JavaScript. aditya27@stanford.edu" width="100%">
+  <img src="profile.svg?v=1d6fe711" alt="adityagarg2712@github - Physics + CS at Stanford University. Windows, macOS, Linux. Python, C++, JavaScript. aditya27@stanford.edu" width="100%">
 </p>
 
 <p align="center">
