@@ -70,7 +70,6 @@ def stats():
     token = os.environ.get("PROFILE_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
         return ["--"] * 5
-    scopes = []   # filled in from X-OAuth-Scopes on the first response
 
     def api(path, body=None, tries=4):
         for _ in range(tries):
@@ -87,45 +86,60 @@ def stats():
                     if r.status == 202:      # stats still being generated
                         time.sleep(3)
                         continue
-                    scopes[:] = [s.strip() for s
-                                 in (r.headers.get("X-OAuth-Scopes") or "").split(",")]
                     return json.loads(raw) if raw else None
             except urllib.error.HTTPError as e:
-                if e.code in (403, 404, 409):   # no access, or empty repo
+                if e.code in (403, 404, 409, 422):   # no access, or empty repo
                     return None
                 raise
         return None
 
-    def lines():
-        """Additions/deletions credited to USER across every repo the token sees.
+    def repo_names():
+        """Every repo on GitHub with work of USER's in it that the token can see.
 
-        Contributor stats are per-repo and private ones need `repo` scope, which
-        a read:user PAT lacks -- hence the scope check before spending 20+ calls.
+        /user/repos misses repos USER was removed from; the commit search finds
+        those as long as they are public. Repos that are private *and* revoked
+        are unreachable by any API -- GitHub only ever reports them in aggregate
+        as restrictedContributionsCount, with no per-repo diff stats.
         """
-        add = dele = 0
-        page, missed, seen = 1, [], 0
+        names, page = set(), 1
         while True:
             batch = api(f"/user/repos?per_page=100&page={page}"
                         "&affiliation=owner,collaborator,organization_member")
             if not batch:
                 break
-            for r in batch:
-                contrib = api(f"/repos/{r['full_name']}/stats/contributors")
-                if contrib is None:
-                    missed.append(r["full_name"])
-                    continue
-                seen += 1
-                for c in contrib:
-                    if (c.get("author") or {}).get("login") != USER:
-                        continue
-                    add += sum(w["a"] for w in c["weeks"])
-                    dele += sum(w["d"] for w in c["weeks"])
+            names |= {r["full_name"] for r in batch}
             if len(batch) < 100:
                 break
             page += 1
+        page = 1
+        while page <= 10:      # search caps at 1000 results anyway
+            hits = api(f"/search/commits?q=author:{USER}&per_page=100&page={page}")
+            if not hits:
+                break
+            names |= {i["repository"]["full_name"] for i in hits["items"]}
+            if page * 100 >= hits["total_count"]:
+                break
+            page += 1
+        return sorted(names)
+
+    def lines():
+        """Additions/deletions credited to USER across every repo we can reach."""
+        add = dele = 0
+        missed, seen = [], 0
+        for full_name in repo_names():
+            contrib = api(f"/repos/{full_name}/stats/contributors")
+            if contrib is None:
+                missed.append(full_name)
+                continue
+            seen += 1
+            for c in contrib:
+                if (c.get("author") or {}).get("login") != USER:
+                    continue
+                add += sum(w["a"] for w in c["weeks"])
+                dele += sum(w["d"] for w in c["weeks"])
+        print(f"line counts: {seen} repo(s) read, +{add:,} / -{dele:,}")
         if missed:
-            print(f"line counts exclude {len(missed)} repo(s) with no stats yet: "
-                  + ", ".join(missed))
+            print(f"  no stats available for {len(missed)}: " + ", ".join(missed))
         if not seen:
             print("no repo stats readable; keeping the previous line counts")
             return None      # never report 0 as if it were a real total
@@ -153,10 +167,9 @@ def stats():
         # ponytail: without a PAT the count silently drops to public-only, so keep
         # whatever the last good render had. Set PROFILE_TOKEN and this goes away.
         commits = n if os.environ.get("PROFILE_TOKEN") else (rendered("Commits") or n)
-        # ponytail: private line counts need `repo` scope. Without it, keep the last
-        # good figure rather than silently reporting public-only totals.
-        loc = (lines() if "repo" in scopes else None) \
-            or rendered("Lines of Code") or "--"
+        # ponytail: a token that can read no repo at all keeps the last good
+        # figure rather than rendering a bogus zero.
+        loc = lines() or rendered("Lines of Code") or "--"
         return [f"{user['public_repos']:,} public",
                 f"{sum(r['stargazers_count'] for r in repos):,}",
                 commits,
