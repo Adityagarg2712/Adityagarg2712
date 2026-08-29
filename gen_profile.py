@@ -59,6 +59,12 @@ def rendered(label):
     return val if val and val != "--" else None
 
 
+def keep_rendered():
+    """Whatever the card already shows -- better than blanking it to dashes."""
+    return [rendered(l) or "--" for l in
+            ("Repos", "Stars", "Commits", "Followers", "Lines of Code")]
+
+
 def prev_additions():
     """The additions figure already on the card, as an int (0 if absent)."""
     n = (rendered("Lines of Code") or "").split(" / ")[0].lstrip("+").replace(",", "")
@@ -80,7 +86,8 @@ def stats():
     """
     token = os.environ.get("PROFILE_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if not token:
-        return ["--"] * 5
+        print("no token; keeping whatever the last render showed")
+        return keep_rendered()
 
     def api(path, body=None, tries=4):
         for _ in range(tries):
@@ -197,8 +204,8 @@ def stats():
                 f"{user['followers']:,}",
                 loc]
     except (urllib.error.URLError, urllib.error.HTTPError, KeyError, TimeoutError) as e:
-        print(f"stats fetch failed ({e}); rendering dashes")
-        return ["--"] * 5
+        print(f"stats fetch failed ({e}); keeping the last render's stats")
+        return keep_rendered()
 
 
 _CARD = None
