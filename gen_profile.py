@@ -59,6 +59,17 @@ def rendered(label):
     return val if val and val != "--" else None
 
 
+def prev_additions():
+    """The additions figure already on the card, as an int (0 if absent)."""
+    n = (rendered("Lines of Code") or "").split(" / ")[0].lstrip("+").replace(",", "")
+    return int(n) if n.isdigit() else 0
+
+
+def plausible(add, prev):
+    """Lines written only ever grow, so a collapse means lost visibility."""
+    return add >= prev // 2
+
+
 def stats():
     """(repos, stars, commits, followers) from the GitHub API, or dashes.
 
@@ -143,6 +154,16 @@ def stats():
         if not seen:
             print("no repo stats readable; keeping the previous line counts")
             return None      # never report 0 as if it were a real total
+        # ponytail: an under-scoped token still reads *some* repos, so "seen > 0"
+        # is not enough -- it happily reports a fraction of the real total. Lines
+        # written only ever grow, so treat a collapse as lost visibility, not lost
+        # code. Blunt but it fails loudly; drop it if history rewrites get common.
+        prev = prev_additions()
+        if not plausible(add, prev):
+            print(f"  REFUSING +{add:,}: less than half the previous +{prev:,}. "
+                  "PROFILE_TOKEN cannot see most repos -- it needs a classic PAT "
+                  "with the `repo` scope. Keeping the previous line counts.")
+            return None
         return f"+{add:,} / -{dele:,}"
 
     def all_commits(created_year):
@@ -375,6 +396,8 @@ def bump_readme(svg):
 if __name__ == "__main__":
     assert "Uptime" in [r[1] for r in card() if r[0] == "kv"]
     assert uptime("2024-09-23")  # date math doesn't blow up on today
+    assert plausible(609_440, 570_405) and not plausible(22_153, 570_405)
+    assert plausible(1, 0)       # first ever render has nothing to compare to
     svg = build()
     assert svg.count("<clipPath") == svg.count("</clipPath>")
     with open(OUT, "w") as f:
